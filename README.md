@@ -10,7 +10,9 @@ Supports JWT authentication, user/role/permission management, and secure CSV dat
 - 🔐 **JWT Authentication** — login and receive a signed token
 - 👥 **Three roles** — `salesperson`, `manager`, `hr`
 - 📤 **CSV Upload** — upload files into named categories; rows auto-tagged with `added_by = "username (role)"`
+- 🧾 **Row CRUD** — manager can add/update/delete/read rows; salesperson can add/read
 - 🗂️ **Category management** — append to existing category or create a new one automatically
+- 🧩 **Preset categories** — `salon`, `supermarket`, `pharmacy`, `electronics`, `restaurant`, plus `others`
 - 🛡️ **Route-level RBAC** — endpoints protected by role using FastAPI dependencies
 - 📋 **Swagger UI** — fully interactive API docs at `/docs`
 
@@ -136,13 +138,9 @@ The API is now running:
 |---|---|---|
 | `POST` | `/auth/login` | Login → returns JWT token |
 
-### Users / Roles / Permissions (Admin)
+### Roles / Permissions (Manager)
 | Method | Endpoint | Description |
 |---|---|---|
-| `GET` | `/users/` | List all users |
-| `POST` | `/users/` | Create user |
-| `PUT` | `/users/{id}` | Update user |
-| `DELETE` | `/users/{id}` | Delete user |
 | `GET/POST/PUT/DELETE` | `/roles/` | Manage roles |
 | `GET/POST/PUT/DELETE` | `/permissions/` | Manage permissions |
 
@@ -150,10 +148,34 @@ The API is now running:
 | Method | Endpoint | Auth | Who |
 |---|---|---|---|
 | `GET` | `/csv/categories` | ✅ JWT | All roles |
-| `POST` | `/csv/upload` | ✅ JWT | All roles |
+| `POST` | `/csv/upload` | ✅ JWT | salesperson / manager |
 | `GET` | `/csv/preview/{category}` | ✅ JWT | All roles |
 | `GET` | `/csv/download/{category}` | ✅ JWT | All roles |
-| `DELETE` | `/csv/{category}` | ✅ JWT | manager / hr only |
+| `DELETE` | `/csv/{category}` | ✅ JWT | manager only |
+
+### CSV Row CRUD
+| Method | Endpoint | Auth | Who |
+|---|---|---|---|
+| `GET` | `/csv/rows/{category}` | ✅ JWT | All roles |
+| `POST` | `/csv/rows/{category}` | ✅ JWT | salesperson / manager |
+| `PUT` | `/csv/rows/{category}/{row_number}` | ✅ JWT | manager only |
+| `DELETE` | `/csv/rows/{category}/{row_number}` | ✅ JWT | manager only |
+
+### Users
+| Method | Endpoint | Auth | Who |
+|---|---|---|---|
+| `GET` | `/users/` | ✅ JWT | hr / manager |
+| `GET` | `/users/{id}` | ✅ JWT | hr / manager |
+| `POST` | `/users/` | ✅ JWT | hr only |
+| `PUT` | `/users/{id}` | ✅ JWT | manager only |
+| `DELETE` | `/users/{id}` | ✅ JWT | manager only |
+
+### Role Capabilities
+| Role | Capabilities |
+|---|---|
+| salesperson | upload CSV, read CSV, add rows, list categories |
+| manager | full CSV CRUD, manage users/roles/permissions |
+| hr | create users, read users, read CSV/categories |
 
 ---
 
@@ -163,7 +185,8 @@ The API is now running:
 2. **Authorize** in Swagger UI → click 🔒 Authorize → paste `Bearer <token>`
 3. **Upload** → `POST /csv/upload`
    - `file`: select your CSV file
-   - `category`: type a name e.g. `leads`, `sales`, `employees`
+   - `category`: pick `salon`, `supermarket`, `pharmacy`, `electronics`, `restaurant`, or `others`
+   - `custom_category`: required when `category` is `others`
 4. **Result:**
    - Category exists → rows **appended** to `uploads/<category>.csv`
    - Category new → **new file created**
@@ -171,18 +194,6 @@ The API is now running:
 
 ---
 
-## Environment Variables (`.env`)
-
-```env
-MONGO_URL=mongodb://localhost:27017
-DATABASE_NAME=rbac_db
-SECRET_KEY=super-secret-rbac-key-change-in-prod
-ALGORITHM=HS256
-ACCESS_TOKEN_EXPIRE_MINUTES=60
-UPLOADS_DIR=uploads
-```
-
----
 
 ## Troubleshooting
 

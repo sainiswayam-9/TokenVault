@@ -2,7 +2,7 @@
 # All Pydantic models in one place — request/response validation
 
 from pydantic import BaseModel, Field
-from typing import Optional, List
+from typing import Optional, List, Dict
 
 
 # ── Auth / JWT ────────────────────────────────────────────────────────────────
@@ -63,3 +63,9 @@ class UpdateRoleRequest(BaseModel):
 class CreatePermissionRequest(BaseModel):
     key:         str = Field(..., min_length=2)
     description: str = Field(..., min_length=5)
+
+
+# ── CSV Row Data ──────────────────────────────────────────────────────────────
+
+class CsvRowDataRequest(BaseModel):
+    data: Dict[str, str]

@@ -13,12 +13,12 @@ import io
 import csv
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends, Body
 from fastapi.responses import FileResponse
 
 from app.guards import get_current_user, require_role
-from app.models import TokenData
-from app.config import UPLOADS_DIR
+from app.models import TokenData, CsvRowDataRequest
+from app.config import UPLOADS_DIR, CSV_PRESET_CATEGORIES
 
 router = APIRouter(prefix="/csv", tags=["CSV Upload"])
 
@@ -39,6 +39,34 @@ def _category_path(category: str) -> str:
     return os.path.join(UPLOADS_DIR, f"{_safe_category(category)}.csv")
 
 
+def _read_csv(filepath: str) -> tuple[list[str], list[dict]]:
+    with open(filepath, "r", newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        rows = list(reader)
+        headers = reader.fieldnames or []
+    return headers, rows
+
+
+def _write_csv(filepath: str, headers: list[str], rows: list[dict]) -> None:
+    with open(filepath, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=headers)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def _ensure_headers(headers: list[str], required: list[str]) -> tuple[list[str], list[str]]:
+    missing = [h for h in required if h not in headers]
+    return headers + missing, missing
+
+
+def _resolve_category(category: str, custom_category: str | None) -> str:
+    if category.lower() == "others":
+        if not custom_category:
+            raise HTTPException(status_code=400, detail="custom_category is required when category is 'others'")
+        return custom_category
+    return category
+
+
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @router.get("/categories")
@@ -53,13 +81,21 @@ async def list_categories(current_user: TokenData = Depends(get_current_user)):
         for f in sorted(os.listdir(UPLOADS_DIR))
         if f.endswith(".csv")
     ]
-    return {"categories": categories, "count": len(categories)}
+    preset = list(CSV_PRESET_CATEGORIES)
+    all_categories = sorted(set(preset + categories))
+    return {
+        "preset": preset,
+        "existing": categories,
+        "all": all_categories,
+        "count": len(all_categories),
+    }
 
 
-@router.post("/upload", status_code=201)
+@router.post("/upload", status_code=201, dependencies=[Depends(require_role("salesperson", "manager"))])
 async def upload_csv(
     file:     UploadFile = File(...,  description="CSV file to upload"),
     category: str        = Form(...,  description="Category name (e.g. leads, sales, employees)"),
+    custom_category: str | None = Form(None, description="Custom name when category is 'others'"),
     current_user: TokenData = Depends(get_current_user),
 ):
     """
@@ -75,7 +111,8 @@ async def upload_csv(
     if not file.filename.lower().endswith(".csv"):
         raise HTTPException(status_code=400, detail="Only .csv files are supported")
 
-    filepath  = _category_path(category)
+    resolved_category = _resolve_category(category, custom_category)
+    filepath  = _category_path(resolved_category)
     added_by  = f"{current_user.username} ({current_user.role})"
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
@@ -97,41 +134,38 @@ async def upload_csv(
         row["added_by"]    = added_by
         row["uploaded_at"] = timestamp
 
-    # 4. Append or create
+    # 4. Append or create (rewrite to ensure audit columns exist)
     file_exists = os.path.exists(filepath)
+    required_headers = ["added_by", "uploaded_at"]
 
     if file_exists:
-        # --- APPEND MODE ---
-        # Read existing headers to maintain column order
-        with open(filepath, "r", newline="", encoding="utf-8") as f:
-            existing_headers = csv.DictReader(f).fieldnames or []
+        existing_headers, existing_rows = _read_csv(filepath)
+        new_headers, missing = _ensure_headers(existing_headers, required_headers)
+        if missing:
+            for row in existing_rows:
+                for col in missing:
+                    row.setdefault(col, "")
 
-        with open(filepath, "a", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=existing_headers, extrasaction="ignore")
-            # Fill any missing columns from incoming rows with empty string
-            normalized = [
-                {col: row.get(col, "") for col in existing_headers}
-                for row in incoming_rows
-            ]
-            writer.writerows(normalized)
-
+        normalized = [
+            {col: row.get(col, "") for col in new_headers}
+            for row in incoming_rows
+        ]
+        all_rows = existing_rows + normalized
+        _write_csv(filepath, new_headers, all_rows)
         action = "appended"
-
     else:
-        # --- CREATE MODE ---
-        new_headers = list(incoming_rows[0].keys())
-
-        with open(filepath, "w", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=new_headers)
-            writer.writeheader()
-            writer.writerows(incoming_rows)
-
+        new_headers, _ = _ensure_headers(list(incoming_rows[0].keys()), required_headers)
+        normalized = [
+            {col: row.get(col, "") for col in new_headers}
+            for row in incoming_rows
+        ]
+        _write_csv(filepath, new_headers, normalized)
         action = "created"
 
     return {
         "message":    f"Category '{category}' {action} successfully",
         "action":     action,
-        "category":   _safe_category(category),
+        "category":   _safe_category(resolved_category),
         "rows_added": len(incoming_rows),
         "added_by":   added_by,
         "file":       filepath,
@@ -152,10 +186,9 @@ async def preview_csv(
     if not os.path.exists(filepath):
         raise HTTPException(status_code=404, detail=f"Category '{category}' not found")
 
-    with open(filepath, "r", newline="", encoding="utf-8") as f:
-        reader  = csv.DictReader(f)
-        data    = [row for _, row in zip(range(rows), reader)]
-        columns = reader.fieldnames or []
+    headers, all_rows = _read_csv(filepath)
+    data = all_rows[:rows]
+    columns = headers
 
     return {
         "category":     _safe_category(category),
@@ -185,7 +218,7 @@ async def download_csv(
     )
 
 
-@router.delete("/{category}", dependencies=[Depends(require_role("manager", "hr"))])
+@router.delete("/{category}", dependencies=[Depends(require_role("manager"))])
 async def delete_category(
     category: str,
     current_user: TokenData = Depends(get_current_user),
@@ -202,4 +235,138 @@ async def delete_category(
     return {
         "message":    f"Category '{category}' deleted",
         "deleted_by": f"{current_user.username} ({current_user.role})",
+    }
+
+
+@router.get("/rows/{category}")
+async def list_rows(
+    category: str,
+    offset: int = 0,
+    limit: int = 50,
+    current_user: TokenData = Depends(get_current_user),
+):
+    """Read CSV rows with pagination."""
+    filepath = _category_path(category)
+    if not os.path.exists(filepath):
+        raise HTTPException(status_code=404, detail=f"Category '{category}' not found")
+
+    headers, rows = _read_csv(filepath)
+    if offset < 0 or limit < 1:
+        raise HTTPException(status_code=400, detail="offset must be >= 0 and limit must be >= 1")
+
+    sliced = rows[offset:offset + limit]
+    return {
+        "category": _safe_category(category),
+        "columns": headers,
+        "offset": offset,
+        "limit": limit,
+        "returned": len(sliced),
+        "total": len(rows),
+        "data": sliced,
+    }
+
+
+@router.post("/rows/{category}", status_code=201)
+async def add_row(
+    category: str,
+    body: CsvRowDataRequest = Body(...),
+    current_user: TokenData = Depends(require_role("salesperson", "manager")),
+):
+    """Add a single row to a category CSV (salesperson / manager)."""
+    filepath = _category_path(category)
+    added_by = f"{current_user.username} ({current_user.role})"
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    required_headers = ["added_by", "uploaded_at"]
+
+    if os.path.exists(filepath):
+        headers, rows = _read_csv(filepath)
+        headers, missing = _ensure_headers(headers, required_headers)
+        if missing:
+            for row in rows:
+                for col in missing:
+                    row.setdefault(col, "")
+    else:
+        headers, _ = _ensure_headers(list(body.data.keys()), required_headers)
+        rows = []
+
+    new_row = {col: body.data.get(col, "") for col in headers}
+    new_row["added_by"] = added_by
+    new_row["uploaded_at"] = timestamp
+    rows.append(new_row)
+
+    _write_csv(filepath, headers, rows)
+
+    return {
+        "message": f"Row added to '{_safe_category(category)}'",
+        "row_number": len(rows),
+        "added_by": added_by,
+    }
+
+
+@router.put("/rows/{category}/{row_number}")
+async def update_row(
+    category: str,
+    row_number: int,
+    body: CsvRowDataRequest = Body(...),
+    current_user: TokenData = Depends(require_role("manager")),
+):
+    """Update a row by row number (manager only)."""
+    filepath = _category_path(category)
+    if not os.path.exists(filepath):
+        raise HTTPException(status_code=404, detail=f"Category '{category}' not found")
+
+    headers, rows = _read_csv(filepath)
+    if row_number < 1 or row_number > len(rows):
+        raise HTTPException(status_code=404, detail="Row number not found")
+
+    restricted = {"added_by", "uploaded_at", "updated_by", "updated_at"}
+    allowed_keys = [k for k in body.data.keys() if k in headers and k not in restricted]
+    ignored = [k for k in body.data.keys() if k not in headers or k in restricted]
+
+    row = rows[row_number - 1]
+    for key in allowed_keys:
+        row[key] = body.data[key]
+
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    headers, missing = _ensure_headers(headers, ["updated_by", "updated_at"])
+    if missing:
+        for r in rows:
+            for col in missing:
+                r.setdefault(col, "")
+
+    row["updated_by"] = f"{current_user.username} ({current_user.role})"
+    row["updated_at"] = timestamp
+
+    _write_csv(filepath, headers, rows)
+
+    return {
+        "message": f"Row {row_number} updated",
+        "row_number": row_number,
+        "updated_by": row["updated_by"],
+        "ignored_fields": ignored,
+    }
+
+
+@router.delete("/rows/{category}/{row_number}")
+async def delete_row(
+    category: str,
+    row_number: int,
+    current_user: TokenData = Depends(require_role("manager")),
+):
+    """Delete a row by row number (manager only)."""
+    filepath = _category_path(category)
+    if not os.path.exists(filepath):
+        raise HTTPException(status_code=404, detail=f"Category '{category}' not found")
+
+    headers, rows = _read_csv(filepath)
+    if row_number < 1 or row_number > len(rows):
+        raise HTTPException(status_code=404, detail="Row number not found")
+
+    deleted = rows.pop(row_number - 1)
+    _write_csv(filepath, headers, rows)
+
+    return {
+        "message": f"Row {row_number} deleted",
+        "deleted_by": f"{current_user.username} ({current_user.role})",
+        "deleted_row": deleted,
     }

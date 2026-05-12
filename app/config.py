@@ -20,3 +20,13 @@ VALID_ROLES = {"salesperson", "manager", "hr"}
 
 # ── CSV Storage ───────────────────────────────────────────────────────────────
 UPLOADS_DIR = os.getenv("UPLOADS_DIR", "uploads")
+
+# ── CSV Categories ────────────────────────────────────────────────────────────
+CSV_PRESET_CATEGORIES = [
+	"salon",
+	"supermarket",
+	"pharmacy",
+	"electronics",
+	"restaurant",
+	"others",
+]

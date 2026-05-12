@@ -9,7 +9,7 @@ from app.models import (
     CreatePermissionRequest,
 )
 from app.auth import hash_password
-from app.guards import get_current_user, require_role
+from app.guards import require_role
 from app.config import VALID_ROLES
 from app.db import (
     get_all_users, get_user_by_username, get_user_by_id,
@@ -24,13 +24,20 @@ users_router = APIRouter(prefix="/users", tags=["Users"])
 
 
 @users_router.get("/")
-async def list_users(request: Request):
+async def list_users(
+    request: Request,
+    current_user=Depends(require_role("hr", "manager")),
+):
     """List all users (passwords excluded)."""
     return await get_all_users(request.app.db)
 
 
 @users_router.get("/{user_id}")
-async def get_user(user_id: str, request: Request):
+async def get_user(
+    user_id: str,
+    request: Request,
+    current_user=Depends(require_role("hr", "manager")),
+):
     """Get a single user by ID."""
     user = await get_user_by_id(request.app.db, user_id)
     if not user:
@@ -40,7 +47,11 @@ async def get_user(user_id: str, request: Request):
 
 
 @users_router.post("/", status_code=201)
-async def add_user(request: Request, body: CreateUserRequest):
+async def add_user(
+    request: Request,
+    body: CreateUserRequest,
+    current_user=Depends(require_role("hr")),
+):
     """Create a new user with an assigned role."""
     db = request.app.db
     if body.role not in VALID_ROLES:
@@ -60,7 +71,12 @@ async def add_user(request: Request, body: CreateUserRequest):
 
 
 @users_router.put("/{user_id}")
-async def edit_user(user_id: str, request: Request, body: UpdateUserRequest):
+async def edit_user(
+    user_id: str,
+    request: Request,
+    body: UpdateUserRequest,
+    current_user=Depends(require_role("manager")),
+):
     """Update a user's password, role, or active status."""
     db       = request.app.db
     existing = await get_user_by_id(db, user_id)
@@ -87,7 +103,11 @@ async def edit_user(user_id: str, request: Request, body: UpdateUserRequest):
 
 
 @users_router.delete("/{user_id}")
-async def remove_user(user_id: str, request: Request):
+async def remove_user(
+    user_id: str,
+    request: Request,
+    current_user=Depends(require_role("manager")),
+):
     """Delete a user permanently."""
     if not await get_user_by_id(request.app.db, user_id):
         raise HTTPException(status_code=404, detail="User not found")
@@ -101,12 +121,19 @@ roles_router = APIRouter(prefix="/roles", tags=["Roles"])
 
 
 @roles_router.get("/")
-async def list_roles(request: Request):
+async def list_roles(
+    request: Request,
+    current_user=Depends(require_role("manager")),
+):
     return await get_all_roles(request.app.db)
 
 
 @roles_router.get("/{role_name}")
-async def get_single_role(role_name: str, request: Request):
+async def get_single_role(
+    role_name: str,
+    request: Request,
+    current_user=Depends(require_role("manager")),
+):
     role = await get_role(request.app.db, role_name)
     if not role:
         raise HTTPException(status_code=404, detail="Role not found")
@@ -114,7 +141,11 @@ async def get_single_role(role_name: str, request: Request):
 
 
 @roles_router.post("/", status_code=201)
-async def add_role(request: Request, body: CreateRoleRequest):
+async def add_role(
+    request: Request,
+    body: CreateRoleRequest,
+    current_user=Depends(require_role("manager")),
+):
     """Create a new role with a list of permission keys."""
     db = request.app.db
     if await get_role(db, body.name):
@@ -127,7 +158,12 @@ async def add_role(request: Request, body: CreateRoleRequest):
 
 
 @roles_router.put("/{role_name}")
-async def edit_role(role_name: str, request: Request, body: UpdateRoleRequest):
+async def edit_role(
+    role_name: str,
+    request: Request,
+    body: UpdateRoleRequest,
+    current_user=Depends(require_role("manager")),
+):
     """Replace a role's permissions list."""
     db = request.app.db
     if not await get_role(db, role_name):
@@ -141,7 +177,11 @@ async def edit_role(role_name: str, request: Request, body: UpdateRoleRequest):
 
 
 @roles_router.delete("/{role_name}")
-async def remove_role(role_name: str, request: Request):
+async def remove_role(
+    role_name: str,
+    request: Request,
+    current_user=Depends(require_role("manager")),
+):
     if not await get_role(request.app.db, role_name):
         raise HTTPException(status_code=404, detail="Role not found")
     if not await delete_role(request.app.db, role_name):
@@ -154,12 +194,19 @@ permissions_router = APIRouter(prefix="/permissions", tags=["Permissions"])
 
 
 @permissions_router.get("/")
-async def list_permissions(request: Request):
+async def list_permissions(
+    request: Request,
+    current_user=Depends(require_role("manager")),
+):
     return await get_all_permissions(request.app.db)
 
 
 @permissions_router.get("/{key}")
-async def get_single_permission(key: str, request: Request):
+async def get_single_permission(
+    key: str,
+    request: Request,
+    current_user=Depends(require_role("manager")),
+):
     perm = await get_permission(request.app.db, key)
     if not perm:
         raise HTTPException(status_code=404, detail="Permission not found")
@@ -167,7 +214,11 @@ async def get_single_permission(key: str, request: Request):
 
 
 @permissions_router.post("/", status_code=201)
-async def add_permission(request: Request, body: CreatePermissionRequest):
+async def add_permission(
+    request: Request,
+    body: CreatePermissionRequest,
+    current_user=Depends(require_role("manager")),
+):
     db = request.app.db
     if await get_permission(db, body.key):
         raise HTTPException(status_code=409, detail="Permission key already exists")
@@ -176,7 +227,12 @@ async def add_permission(request: Request, body: CreatePermissionRequest):
 
 
 @permissions_router.put("/{key}")
-async def edit_permission(key: str, request: Request, body: CreatePermissionRequest):
+async def edit_permission(
+    key: str,
+    request: Request,
+    body: CreatePermissionRequest,
+    current_user=Depends(require_role("manager")),
+):
     if not await get_permission(request.app.db, key):
         raise HTTPException(status_code=404, detail="Permission not found")
     if not await update_permission(request.app.db, key, body.description):
@@ -185,7 +241,11 @@ async def edit_permission(key: str, request: Request, body: CreatePermissionRequ
 
 
 @permissions_router.delete("/{key}")
-async def remove_permission(key: str, request: Request):
+async def remove_permission(
+    key: str,
+    request: Request,
+    current_user=Depends(require_role("manager")),
+):
     if not await get_permission(request.app.db, key):
         raise HTTPException(status_code=404, detail="Permission not found")
     if not await delete_permission(request.app.db, key):

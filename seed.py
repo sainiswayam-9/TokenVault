@@ -47,11 +47,11 @@ async def seed():
 
     # Permissions
     await db["permissions"].insert_many(PERMISSIONS)
-    print(f"✓ {len(PERMISSIONS)} permissions inserted")
+    print(f"[OK] {len(PERMISSIONS)} permissions inserted")
 
     # Roles
     await db["roles"].insert_many(ROLES)
-    print(f"✓ {len(ROLES)} roles inserted: {[r['name'] for r in ROLES]}")
+    print(f"[OK] {len(ROLES)} roles inserted: {[r['name'] for r in ROLES]}")
 
     # Users
     users_to_insert = [
@@ -64,12 +64,12 @@ async def seed():
         for u in USERS
     ]
     await db["users"].insert_many(users_to_insert)
-    print(f"✓ {len(USERS)} users inserted:")
+    print(f"[OK] {len(USERS)} users inserted:")
     for u in USERS:
         print(f"    {u['username']:10s} | role: {u['role']:12s} | password: {u['password']}")
 
     client.close()
-    print("\n✅ Seeding complete!")
+    print("\nSeeding complete!")
     print("\nStart the API:")
     print("   uvicorn app.main:app --port 8000 --reload")
     print("   Open: http://localhost:8000/docs")
