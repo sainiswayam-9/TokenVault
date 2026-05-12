@@ -1,0 +1,478 @@
+================================================================
+  SWAGGER UI TEST GUIDE — RBAC PROJECT
+  URL: http://localhost:8000/docs
+================================================================
+
+HOW TO USE THIS FILE
+--------------------
+1. Start the API:   uvicorn app.main:app --port 8000 --reload
+2. Open:            http://localhost:8000/docs
+3. Run Step 0 first (login), then copy the access_token value.
+4. Click the lock icon "Authorize" at the top-right of Swagger UI.
+5. Paste:           Bearer <paste_token_here>
+6. Click Authorize, then Close.
+7. Now all protected endpoints will use your token.
+8. To test as a different user, repeat from Step 0.
+
+================================================================
+  STEP 0 — LOGIN (do this first, for every role you want to test)
+================================================================
+
+----------------------------------------------------------------
+  POST /auth/login
+----------------------------------------------------------------
+
+[Login as Salesperson - Alice]
+{
+  "username": "alice",
+  "password": "alice123"
+}
+
+[Login as Salesperson - Bob]
+{
+  "username": "bob",
+  "password": "bob123"
+}
+
+[Login as Salesperson - Charlie]
+{
+  "username": "charlie",
+  "password": "charlie123"
+}
+
+[Login as Manager - Evan]
+{
+  "username": "evan",
+  "password": "evan123"
+}
+
+[Login as HR - Diana]
+{
+  "username": "diana",
+  "password": "diana123"
+}
+
+--- Error cases ---
+
+[Wrong password — expect 401]
+{
+  "username": "alice",
+  "password": "wrongpassword"
+}
+
+[Non-existent user — expect 401]
+{
+  "username": "ghost",
+  "password": "ghost123"
+}
+
+
+================================================================
+  STEP 1 — CSV UPLOAD WORKFLOWS
+  Endpoint: /csv/upload
+  Auth: ALL roles (salesperson, manager, hr)
+================================================================
+
+The form has TWO fields:
+  • file     → click "Choose File" and select a .csv file
+  • category → type the category name (e.g. leads, sales, employees)
+
+----------------------------------------------------------------
+  WORKFLOW A — Upload to a NEW category (creates the file)
+----------------------------------------------------------------
+
+[As Alice (salesperson) — Upload ChattySalon.CSV as category "leads"]
+POST /csv/upload
+  file:     ChattySalon.CSV
+  category: leads
+
+Expected response:
+{
+  "message":    "Category 'leads' created successfully",
+  "action":     "created",
+  "category":   "leads",
+  "rows_added": <number of rows in the CSV>,
+  "added_by":   "alice (salesperson)",
+  "file":       "uploads/leads.csv"
+}
+
+Check the result:
+  → Open uploads/leads.csv — every row now has:
+       added_by    = "alice (salesperson)"
+       uploaded_at = "2026-05-12 06:37 UTC"
+
+----------------------------------------------------------------
+  WORKFLOW B — Upload to an EXISTING category (appends rows)
+----------------------------------------------------------------
+
+[As Bob (salesperson) — Upload another CSV to the same "leads" category]
+POST /csv/upload
+  file:     <any other .csv file>
+  category: leads
+
+Expected response:
+{
+  "message":    "Category 'leads' appended successfully",
+  "action":     "appended",
+  "category":   "leads",
+  "rows_added": <number of new rows>,
+  "added_by":   "bob (salesperson)",
+  "file":       "uploads/leads.csv"
+}
+
+Check the result:
+  → The existing leads.csv now has MORE rows at the bottom.
+  → New rows show added_by = "bob (salesperson)"
+  → Original rows still show added_by = "alice (salesperson)"
+
+----------------------------------------------------------------
+  WORKFLOW C — Different roles upload to different categories
+----------------------------------------------------------------
+
+[As Evan (manager) — Upload to "sales" category]
+POST /csv/upload
+  file:     <sales data .csv>
+  category: sales
+
+[As Diana (hr) — Upload to "employees" category]
+POST /csv/upload
+  file:     <employee data .csv>
+  category: employees
+
+----------------------------------------------------------------
+  WORKFLOW D — Error cases
+----------------------------------------------------------------
+
+[Upload a non-CSV file — expect 400]
+POST /csv/upload
+  file:     some_file.xlsx
+  category: leads
+
+[Upload an empty CSV — expect 400]
+POST /csv/upload
+  file:     empty.csv
+  category: leads
+
+[Upload without logging in (no token) — expect 403]
+  → Remove the Authorize token, then try POST /csv/upload
+
+
+================================================================
+  STEP 2 — LIST CATEGORIES
+  Endpoint: GET /csv/categories
+  Auth: ALL roles
+================================================================
+
+[As any logged-in user — list all available categories]
+GET /csv/categories
+
+Expected response:
+{
+  "categories": ["employees", "leads", "sales"],
+  "count": 3
+}
+
+[Without token — expect 403]
+  → Remove the Authorize token, then try GET /csv/categories
+
+
+================================================================
+  STEP 3 — PREVIEW A CATEGORY
+  Endpoint: GET /csv/preview/{category}
+  Auth: ALL roles
+================================================================
+
+[Preview first 20 rows of "leads" category]
+GET /csv/preview/leads
+
+[Preview first 5 rows only — use query param]
+GET /csv/preview/leads?rows=5
+
+Expected response:
+{
+  "category":     "leads",
+  "columns":      ["Business Name", "Business Phone", ..., "added_by", "uploaded_at"],
+  "preview_rows": 20,
+  "data":         [ { ... }, { ... }, ... ]
+}
+
+[Preview a non-existent category — expect 404]
+GET /csv/preview/nonexistent
+
+
+================================================================
+  STEP 4 — DOWNLOAD A CATEGORY
+  Endpoint: GET /csv/download/{category}
+  Auth: ALL roles
+================================================================
+
+[Download the full leads CSV]
+GET /csv/download/leads
+  → Browser downloads leads.csv
+
+[Download employees CSV]
+GET /csv/download/employees
+
+[Download non-existent category — expect 404]
+GET /csv/download/nonexistent
+
+
+================================================================
+  STEP 5 — DELETE A CATEGORY
+  Endpoint: DELETE /csv/{category}
+  Auth: manager and hr ONLY (salesperson gets 403)
+================================================================
+
+--- As Evan (manager) ---
+
+[Delete the "leads" category]
+DELETE /csv/leads
+
+Expected response:
+{
+  "message":    "Category 'leads' deleted",
+  "deleted_by": "evan (manager)"
+}
+
+[Verify it is gone]
+GET /csv/categories
+  → "leads" should no longer appear
+
+[Delete already-deleted category — expect 404]
+DELETE /csv/leads
+
+--- As Diana (hr) ---
+
+[HR can also delete categories]
+DELETE /csv/employees
+Expected response:
+{
+  "deleted_by": "diana (hr)"
+}
+
+--- As Alice (salesperson) — expect 403 ---
+
+[Salesperson CANNOT delete — expect 403]
+DELETE /csv/sales
+  → Response: 403 Access denied. Required: ['manager', 'hr']. Your role: salesperson
+
+
+================================================================
+  STEP 6 — USER MANAGEMENT (Admin)
+  Endpoint: /users
+================================================================
+
+[List all users — no auth required in dev]
+GET /users/
+
+[Create a new salesperson]
+POST /users/
+{
+  "username": "testuser",
+  "password": "test123",
+  "role": "salesperson"
+}
+
+[Create a new manager]
+POST /users/
+{
+  "username": "testmanager",
+  "password": "manager123",
+  "role": "manager"
+}
+
+[Create a new HR user]
+POST /users/
+{
+  "username": "testhr",
+  "password": "hr12345",
+  "role": "hr"
+}
+
+--- Error cases ---
+
+[Invalid role — expect 400]
+POST /users/
+{
+  "username": "baduser",
+  "password": "bad123",
+  "role": "superadmin"
+}
+
+[Duplicate username — expect 409]
+POST /users/
+{
+  "username": "alice",
+  "password": "alice123",
+  "role": "salesperson"
+}
+
+[Password too short — expect 422]
+POST /users/
+{
+  "username": "shortpass",
+  "password": "abc",
+  "role": "salesperson"
+}
+
+NOTE: Copy an "id" from GET /users/ output for steps below.
+Replace <USER_ID> with the actual MongoDB ObjectId string.
+
+[Get single user by ID]
+GET /users/<USER_ID>
+
+[Update user password only]
+PUT /users/<USER_ID>
+{
+  "password": "newpassword123"
+}
+
+[Update user role only]
+PUT /users/<USER_ID>
+{
+  "role": "manager"
+}
+
+[Disable account]
+PUT /users/<USER_ID>
+{
+  "is_active": false
+}
+
+[Re-enable account]
+PUT /users/<USER_ID>
+{
+  "is_active": true
+}
+
+[Empty update body — expect 400]
+PUT /users/<USER_ID>
+{}
+
+[Delete user]
+DELETE /users/<USER_ID>
+
+[Get deleted user — expect 404]
+GET /users/<USER_ID>
+
+
+================================================================
+  STEP 7 — ROLE MANAGEMENT (Admin)
+  Endpoint: /roles
+================================================================
+
+[List all roles]
+GET /roles/
+
+[Get a specific role]
+GET /roles/salesperson
+GET /roles/manager
+GET /roles/hr
+
+[Create a custom role]
+POST /roles/
+{
+  "name": "auditor",
+  "permissions": ["upload_csv", "download_csv", "view_categories"]
+}
+
+[Update role permissions]
+PUT /roles/auditor
+{
+  "permissions": ["download_csv", "view_categories"]
+}
+
+[Duplicate role — expect 409]
+POST /roles/
+{
+  "name": "auditor",
+  "permissions": []
+}
+
+[Role with non-existent permission — expect 400]
+POST /roles/
+{
+  "name": "testrole",
+  "permissions": ["nonexistent_permission"]
+}
+
+[Delete the test role]
+DELETE /roles/auditor
+
+[Get deleted role — expect 404]
+GET /roles/auditor
+
+
+================================================================
+  STEP 8 — PERMISSION MANAGEMENT (Admin)
+  Endpoint: /permissions
+================================================================
+
+[List all permissions]
+GET /permissions/
+
+[Get a specific permission]
+GET /permissions/upload_csv
+GET /permissions/download_csv
+GET /permissions/delete_category
+GET /permissions/view_categories
+
+[Create a new permission]
+POST /permissions/
+{
+  "key": "export_report",
+  "description": "Allows exporting reports to PDF or Excel"
+}
+
+[Update permission description]
+PUT /permissions/export_report
+{
+  "key": "export_report",
+  "description": "Allows exporting reports to PDF, Excel, or CSV"
+}
+
+[Duplicate permission — expect 409]
+POST /permissions/
+{
+  "key": "export_report",
+  "description": "Duplicate attempt"
+}
+
+[Delete permission]
+DELETE /permissions/export_report
+
+[Get deleted permission — expect 404]
+GET /permissions/export_report
+
+
+================================================================
+  HEALTH CHECK (no auth required)
+================================================================
+
+GET http://localhost:8000/
+  → { "service": "RBAC API", "status": "running", "version": "3.0.0" }
+
+
+================================================================
+  TEST CREDENTIALS SUMMARY
+================================================================
+
+Username   Password      Role
+---------  -----------   -----------
+alice      alice123      salesperson
+bob        bob123        salesperson
+charlie    charlie123    salesperson
+evan       evan123       manager
+diana      diana123      hr
+
+================================================================
+  ROLE PERMISSIONS SUMMARY
+================================================================
+
+Role          Can Upload CSV   Can Download   Can Delete Category
+-----------   --------------   ------------   -------------------
+salesperson   YES              YES            NO  (403)
+manager       YES              YES            YES
+hr            YES              YES            YES
+
+================================================================

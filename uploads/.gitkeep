@@ -1,0 +1,2 @@
+# This file keeps the uploads/ directory in git.
+# Actual CSV files uploaded via the API are stored here and ignored by .gitignore.

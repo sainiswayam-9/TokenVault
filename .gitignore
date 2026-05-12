@@ -1,0 +1,63 @@
+# ─────────────────────────────────────────────
+#  RBAC Project — .gitignore
+# ─────────────────────────────────────────────
+
+# ── Environment & Secrets ─────────────────────
+.env
+.env.*
+!.env.example
+
+# ── Python ────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+parts/
+var/
+sdist/
+develop-eggs/
+.installed.cfg
+lib/
+lib64/
+
+# ── Virtual Environment ───────────────────────
+.venv/
+venv/
+env/
+ENV/
+.Python
+
+# ── IDE / Editor ──────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ── Testing & Coverage ────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+nosetests.xml
+coverage.xml
+*.cover
+
+# ── CSV Uploads (user data — do not commit) ───────────────────────────────────
+uploads/*.csv
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── MongoDB local data (if running locally) ───
+data/db/
+mongodb-data/

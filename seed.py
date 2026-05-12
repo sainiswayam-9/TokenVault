@@ -1,32 +1,32 @@
 # seed.py
-# Run once to populate MongoDB with roles, permissions, users, and sample data.
+# Run once to populate MongoDB with roles, permissions, and sample users.
 # Usage: python seed.py
 
 import asyncio
 from motor.motor_asyncio import AsyncIOMotorClient
 from passlib.context import CryptContext
 
-MONGO_URL = "mongodb://localhost:27017"
+MONGO_URL     = "mongodb://localhost:27017"
 DATABASE_NAME = "rbac_db"
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-# ── Permissions ──────────────────────────────────────────────────
+# ── Permissions ───────────────────────────────────────────────────────────────
 PERMISSIONS = [
-    {"key": "view_own_sales",  "description": "View own sales records only"},
-    {"key": "view_all_sales",  "description": "View all sales records across the team"},
-    {"key": "view_reports",    "description": "View business summary reports"},
-    {"key": "view_employees",  "description": "View employee records and salaries"},
+    {"key": "upload_csv",      "description": "Upload CSV data to any category"},
+    {"key": "download_csv",    "description": "Download CSV files"},
+    {"key": "delete_category", "description": "Delete a category CSV (manager/hr only)"},
+    {"key": "view_categories", "description": "List available CSV categories"},
 ]
 
-# ── Roles ────────────────────────────────────────────────────────
+# ── Roles ─────────────────────────────────────────────────────────────────────
 ROLES = [
-    {"name": "salesperson", "permissions": ["view_own_sales"]},
-    {"name": "manager",     "permissions": ["view_all_sales", "view_reports"]},
-    {"name": "hr",          "permissions": ["view_employees"]},
+    {"name": "salesperson", "permissions": ["upload_csv", "download_csv", "view_categories"]},
+    {"name": "manager",     "permissions": ["upload_csv", "download_csv", "view_categories", "delete_category"]},
+    {"name": "hr",          "permissions": ["upload_csv", "download_csv", "view_categories", "delete_category"]},
 ]
 
-# ── Users ────────────────────────────────────────────────────────
+# ── Users ─────────────────────────────────────────────────────────────────────
 USERS = [
     {"username": "alice",   "password": "alice123",   "role": "salesperson"},
     {"username": "bob",     "password": "bob123",     "role": "salesperson"},
@@ -35,39 +35,15 @@ USERS = [
     {"username": "diana",   "password": "diana123",   "role": "hr"},
 ]
 
-# ── Sample Sales ─────────────────────────────────────────────────
-SALES = [
-    {"product": "CRM Pro",       "amount": 12000.0, "salesperson": "alice",   "date": "2024-05-01"},
-    {"product": "Analytics Hub", "amount": 8500.0,  "salesperson": "bob",     "date": "2024-05-03"},
-    {"product": "CRM Pro",       "amount": 15000.0, "salesperson": "alice",   "date": "2024-05-10"},
-    {"product": "Data Vault",    "amount": 22000.0, "salesperson": "charlie", "date": "2024-05-12"},
-    {"product": "Analytics Hub", "amount": 9800.0,  "salesperson": "bob",     "date": "2024-06-01"},
-]
-
-# ── Sample Reports ───────────────────────────────────────────────
-REPORTS = [
-    {"period": "Q1 2024", "total_revenue": 180000.0, "top_product": "CRM Pro",    "total_deals": 24},
-    {"period": "Q2 2024", "total_revenue": 210000.0, "top_product": "Data Vault", "total_deals": 31},
-]
-
-# ── Sample Employees ─────────────────────────────────────────────
-EMPLOYEES = [
-    {"name": "Alice",   "department": "Sales",      "salary": 72000.0, "join_date": "2022-03-15"},
-    {"name": "Bob",     "department": "Sales",      "salary": 68000.0, "join_date": "2021-07-01"},
-    {"name": "Charlie", "department": "Sales",      "salary": 74000.0, "join_date": "2023-01-20"},
-    {"name": "Diana",   "department": "HR",         "salary": 80000.0, "join_date": "2020-11-05"},
-    {"name": "Evan",    "department": "Management", "salary": 95000.0, "join_date": "2019-06-10"},
-]
-
 
 async def seed():
     client = AsyncIOMotorClient(MONGO_URL)
-    db = client[DATABASE_NAME]
+    db     = client[DATABASE_NAME]
 
     # Drop all collections for a clean slate
-    for col in ["permissions", "roles", "users", "sales", "reports", "employees"]:
+    for col in ["permissions", "roles", "users"]:
         await db[col].drop()
-    print("Cleared all collections.\n")
+    print("Cleared existing collections.\n")
 
     # Permissions
     await db["permissions"].insert_many(PERMISSIONS)
@@ -80,10 +56,10 @@ async def seed():
     # Users
     users_to_insert = [
         {
-            "username": u["username"],
+            "username":        u["username"],
             "hashed_password": pwd_context.hash(u["password"]),
-            "role": u["role"],
-            "is_active": True,
+            "role":            u["role"],
+            "is_active":       True,
         }
         for u in USERS
     ]
@@ -92,22 +68,11 @@ async def seed():
     for u in USERS:
         print(f"    {u['username']:10s} | role: {u['role']:12s} | password: {u['password']}")
 
-    # Sales
-    await db["sales"].insert_many(SALES)
-    print(f"\n✓ {len(SALES)} sales records inserted")
-
-    # Reports
-    await db["reports"].insert_many(REPORTS)
-    print(f"✓ {len(REPORTS)} reports inserted")
-
-    # Employees
-    await db["employees"].insert_many(EMPLOYEES)
-    print(f"✓ {len(EMPLOYEES)} employees inserted")
-
     client.close()
-    print("\n✅ Seeding complete! Start both services:")
-    print("   uvicorn auth_service.main:app --port 8000 --reload")
-    print("   uvicorn data_service.main:app --port 8001 --reload")
+    print("\n✅ Seeding complete!")
+    print("\nStart the API:")
+    print("   uvicorn app.main:app --port 8000 --reload")
+    print("   Open: http://localhost:8000/docs")
 
 
 if __name__ == "__main__":
